@@ -18,6 +18,7 @@
 
 #include <QtGui/QTextCursor>
 
+#include <QTimer>
 #include <any>
 
 class QMenu;
@@ -429,6 +430,7 @@ private:
 	void inputMethodEventInner(QInputMethodEvent *e);
 	void paintEventInner(QPaintEvent *e);
 	void paintQuotes(QPaintEvent *e);
+	void paintCustomCursor();
 
 	void mousePressEventInner(QMouseEvent *e);
 	void mouseReleaseEventInner(QMouseEvent *e);
@@ -637,6 +639,13 @@ private:
 
 	bool _focused = false;
 	bool _error = false;
+	bool _cursorBlinkVisible = false;
+	mutable double _cursorAnimX = -1.0;
+	mutable double _cursorAnimY = -1.0;
+	mutable double _cursorTargetX = -1.0;
+	mutable double _cursorTargetY = -1.0;
+	std::unique_ptr<QTimer> _cursorBlinkTimer;
+	std::unique_ptr<QTimer> _cursorAnimTimer;
 
 	bool _correcting = false;
 	MimeDataHook _mimeDataHook;

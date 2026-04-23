@@ -26,9 +26,11 @@
 #include "ui/integration.h"
 #include "styles/style_widgets.h"
 #include "styles/palette.h"
+#include "ayu/ayu_ui_settings.h"
 
 #include <QtCore/QMimeData>
 #include <QtCore/QRegularExpression>
+#include <QtCore/QTimerEvent>
 #include <QtGui/QClipboard>
 #include <QtGui/QTextBlock>
 #include <QtGui/QTextDocumentFragment>
@@ -1644,6 +1646,12 @@ InputField::InputField(
 				cursor.selectionEnd(),
 			});
 		}
+		_cursorBlinkVisible = true;
+		if (_cursorBlinkTimer) {
+			_cursorBlinkTimer->setInterval(AyuUiSettings::getCursorBlinkDelay());
+			_cursorBlinkTimer->start();
+		}
+		_inner->viewport()->update();
 	}, lifetime());
 	base::qt_signal_producer(
 		_inner.get(),
@@ -1925,7 +1933,66 @@ void InputField::customEmojiRepaint() {
 void InputField::paintEventInner(QPaintEvent *e) {
 	_customEmojiRepaintScheduled = false;
 	paintQuotes(e);
+
+	const auto shape = AyuUiSettings::getCursorShape();
+	_inner->setCursorWidth(shape == AyuUiSettings::CursorShape::Default ? 1 : 0);
 	_inner->QTextEdit::paintEvent(e);
+
+	if (shape != AyuUiSettings::CursorShape::Default
+		&& _inner->hasFocus()
+		&& _cursorBlinkVisible) {
+		paintCustomCursor();
+	}
+}
+
+void InputField::paintCustomCursor() {
+	const auto shape = AyuUiSettings::getCursorShape();
+	const auto cursor = _inner->textCursor();
+	const auto realRect = _inner->cursorRect(cursor);
+	const auto metrics = QFontMetrics(_inner->font());
+	const auto charWidth = metrics.averageCharWidth();
+
+	const auto targetX = double(realRect.x());
+	const auto targetY = double(realRect.y());
+
+	if (AyuUiSettings::isCursorAnimationEnabled()) {
+		if (_cursorAnimX < 0.0) {
+			_cursorAnimX = targetX;
+			_cursorAnimY = targetY;
+			_cursorTargetX = targetX;
+			_cursorTargetY = targetY;
+		} else if (!qFuzzyCompare(_cursorTargetX, targetX)
+				|| !qFuzzyCompare(_cursorTargetY, targetY)) {
+			_cursorTargetX = targetX;
+			_cursorTargetY = targetY;
+			if (_cursorAnimTimer && !_cursorAnimTimer->isActive()) {
+				_cursorAnimTimer->start();
+			}
+		}
+	} else {
+		_cursorAnimX = targetX;
+		_cursorAnimY = targetY;
+	}
+
+	const auto x = qRound(_cursorAnimX);
+	const auto y = qRound(_cursorAnimY);
+	const auto h = realRect.height();
+
+	auto p = QPainter(_inner->viewport());
+	p.setPen(Qt::NoPen);
+
+	if (shape == AyuUiSettings::CursorShape::Line) {
+		p.setBrush(_st.textFg->c);
+		p.drawRect(x, y, 2, h);
+	} else if (shape == AyuUiSettings::CursorShape::Block) {
+		p.setCompositionMode(QPainter::CompositionMode_Difference);
+		p.setBrush(Qt::white);
+		p.drawRect(x, y, charWidth, h);
+	} else if (shape == AyuUiSettings::CursorShape::Underline) {
+		const auto uh = std::max(2, h / 8);
+		p.setBrush(_st.textFg->c);
+		p.drawRect(x, y + h - uh, charWidth, uh);
+	}
 }
 
 void InputField::paintQuotes(QPaintEvent *e) {
@@ -2760,12 +2827,59 @@ void InputField::focusInEventInner(QFocusEvent *e) {
 		? mapFromGlobal(QCursor::pos()).x()
 		: (width() / 2);
 	setFocused(true);
+	if (AyuUiSettings::getCursorShape() != AyuUiSettings::CursorShape::Default) {
+		_cursorBlinkVisible = true;
+		_cursorAnimX = -1.0;
+		_cursorAnimY = -1.0;
+		_cursorTargetX = -1.0;
+		_cursorTargetY = -1.0;
+		if (!_cursorBlinkTimer) {
+			_cursorBlinkTimer = std::make_unique<QTimer>();
+			QObject::connect(_cursorBlinkTimer.get(), &QTimer::timeout, [=] {
+				_cursorBlinkVisible = !_cursorBlinkVisible;
+				_inner->viewport()->update();
+			});
+		}
+		_cursorBlinkTimer->setInterval(AyuUiSettings::getCursorBlinkDelay());
+		_cursorBlinkTimer->start();
+
+		if (!_cursorAnimTimer) {
+			_cursorAnimTimer = std::make_unique<QTimer>();
+			_cursorAnimTimer->setInterval(16);
+			QObject::connect(_cursorAnimTimer.get(), &QTimer::timeout, [=] {
+				if (!AyuUiSettings::isCursorAnimationEnabled()) {
+					_cursorAnimTimer->stop();
+					return;
+				}
+				const auto speed = AyuUiSettings::getCursorAnimationSpeed() / 100.0;
+				const auto doneX = std::abs(_cursorTargetX - _cursorAnimX) < 0.5;
+				const auto doneY = std::abs(_cursorTargetY - _cursorAnimY) < 0.5;
+				if (doneX && doneY) {
+					_cursorAnimX = _cursorTargetX;
+					_cursorAnimY = _cursorTargetY;
+					_cursorAnimTimer->stop();
+				} else {
+					if (!doneX) _cursorAnimX += (_cursorTargetX - _cursorAnimX) * speed;
+					if (!doneY) _cursorAnimY += (_cursorTargetY - _cursorAnimY) * speed;
+				}
+				_inner->viewport()->update();
+			});
+		}
+	}
 	_inner->QTextEdit::focusInEvent(e);
 	_focusedChanges.fire(true);
 }
 
 void InputField::focusOutEventInner(QFocusEvent *e) {
 	setFocused(false);
+	if (_cursorBlinkTimer) {
+		_cursorBlinkTimer->stop();
+	}
+	if (_cursorAnimTimer) {
+		_cursorAnimTimer->stop();
+	}
+	_cursorBlinkVisible = false;
+	_inner->viewport()->update();
 	_inner->QTextEdit::focusOutEvent(e);
 	_focusedChanges.fire(false);
 }

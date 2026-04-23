@@ -14,6 +14,10 @@ QString monoFont;
 double wideMultiplier = 1.0;
 bool materialSwitches;
 int avatarCorners = kMaxAvatarCorners;
+CursorShape cursorShape = CursorShape::Default;
+int cursorBlinkDelay = kDefaultCursorBlinkDelay;
+bool cursorAnimationEnabled = true;
+int cursorAnimationSpeed = 45;
 
 void setMonoFont(QString newFont) {
 	monoFont = std::move(newFont);
@@ -53,6 +57,38 @@ void setAvatarCorners(int val) {
 
 int getAvatarCorners() {
 	return avatarCorners;
+}
+
+void setCursorShape(CursorShape shape) {
+	cursorShape = shape;
+}
+
+CursorShape getCursorShape() {
+	return cursorShape;
+}
+
+void setCursorBlinkDelay(int ms) {
+	cursorBlinkDelay = ms;
+}
+
+int getCursorBlinkDelay() {
+	return cursorBlinkDelay;
+}
+
+void setCursorAnimationEnabled(bool enabled) {
+	cursorAnimationEnabled = enabled;
+}
+
+bool isCursorAnimationEnabled() {
+	return cursorAnimationEnabled;
+}
+
+void setCursorAnimationSpeed(int percent) {
+	cursorAnimationSpeed = percent;
+}
+
+int getCursorAnimationSpeed() {
+	return cursorAnimationSpeed;
 }
 
 }
